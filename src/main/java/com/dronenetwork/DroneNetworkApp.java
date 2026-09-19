@@ -4,6 +4,8 @@ import javafx.application.Application;
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.TextArea;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -20,7 +22,7 @@ import java.util.List;
 
 /**
  * DroneNetworkApp visualizes the Ford-Fulkerson Max-Flow algorithm
- * for an autonomous drone deployment network.
+ * and shortest path for an autonomous drone deployment network.
  */
 public class DroneNetworkApp extends Application {
 
@@ -60,6 +62,8 @@ public class DroneNetworkApp extends Application {
     private List<EdgeUI> edgeUIs = new ArrayList<>();
     private Pane graphPane;
     private Text resultText;
+    private TextArea fleetStatsArea;
+    private DroneFleetManager fleetManager;
 
     public static void main(String[] args) {
         launch(args);
@@ -67,15 +71,19 @@ public class DroneNetworkApp extends Application {
 
     @Override
     public void start(Stage primaryStage) {
-        primaryStage.setTitle("Autonomous Drone Network - Max Flow Optimizer");
+        primaryStage.setTitle("Autonomous Drone Network - Operations Center");
 
-        VBox root = new VBox(20);
+        // Initialize fleet manager and generate random parameters
+        fleetManager = new DroneFleetManager();
+        fleetManager.generateRandomFleet(20); // Generate 20 random drones on startup
+
+        VBox root = new VBox(15);
         root.setPadding(new Insets(20));
         root.setStyle("-fx-background-color: #e0e0e0;");
 
         // The pane where the graph will be drawn
         graphPane = new Pane();
-        graphPane.setPrefSize(1000, 600);
+        graphPane.setPrefSize(1000, 500);
         graphPane.setStyle("-fx-background-color: white; -fx-border-color: #999; -fx-border-width: 2;");
 
         // Draw the edges (lines + arrows + text) before nodes so they sit in the background
@@ -84,26 +92,39 @@ public class DroneNetworkApp extends Application {
         // Draw the nodes (circles + text labels)
         drawNodes();
 
-        // Control Panel UI
-        Button calculateBtn = new Button("Deploy Drones (Calculate Max Flow)");
-        calculateBtn.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        calculateBtn.setStyle("-fx-background-color: #2196F3; -fx-text-fill: white; -fx-padding: 10 20; -fx-cursor: hand;");
-        calculateBtn.setOnAction(e -> calculateAndDisplayMaxFlow());
+        // Control Panel UI (Buttons)
+        HBox buttonBox = new HBox(20);
         
-        resultText = new Text("Total Drones Deployed: 0");
-        resultText.setFont(Font.font("Arial", FontWeight.BOLD, 18));
+        Button maxFlowBtn = new Button("Deploy Drones (Calculate Max Flow)");
+        maxFlowBtn.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        maxFlowBtn.setStyle("-fx-background-color: #2196F3; -fx-text-fill: white; -fx-padding: 10 20; -fx-cursor: hand;");
+        maxFlowBtn.setOnAction(e -> calculateAndDisplayMaxFlow());
+        
+        Button shortestPathBtn = new Button("Deploy First Responder (Shortest Path)");
+        shortestPathBtn.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        shortestPathBtn.setStyle("-fx-background-color: #FF9800; -fx-text-fill: white; -fx-padding: 10 20; -fx-cursor: hand;");
+        shortestPathBtn.setOnAction(e -> deployFirstResponder());
+
+        buttonBox.getChildren().addAll(maxFlowBtn, shortestPathBtn);
+        
+        resultText = new Text("System Ready. Awaiting Command...");
+        resultText.setFont(Font.font("Arial", FontWeight.BOLD, 16));
         resultText.setFill(Color.DARKSLATEGRAY);
 
-        root.getChildren().addAll(graphPane, calculateBtn, resultText);
+        // UI element to show generated random parameters/selected drones
+        fleetStatsArea = new TextArea();
+        fleetStatsArea.setEditable(false);
+        fleetStatsArea.setPrefRowCount(6);
+        fleetStatsArea.setFont(Font.font("Monospaced", 12));
+        fleetStatsArea.setText("Fleet Manager Initialized. 20 drones available in inventory.\nReady for deployment optimization.");
 
-        Scene scene = new Scene(root, 1040, 750);
+        root.getChildren().addAll(graphPane, buttonBox, resultText, fleetStatsArea);
+
+        Scene scene = new Scene(root, 1040, 800);
         primaryStage.setScene(scene);
         primaryStage.show();
     }
 
-    /**
-     * Draws directional lines and initial flow/capacity labels for all connected edges.
-     */
     private void drawEdges() {
         for (int u = 0; u < NUM_NODES; u++) {
             for (int v = 0; v < NUM_NODES; v++) {
@@ -113,21 +134,17 @@ public class DroneNetworkApp extends Application {
                     double endX = nodeCoords[v][0];
                     double endY = nodeCoords[v][1];
 
-                    // Draw the corridor line
                     Line line = new Line(startX, startY, endX, endY);
                     line.setStrokeWidth(2);
                     line.setStroke(Color.LIGHTGRAY);
 
-                    // Calculate direction angle to place the arrow properly
                     double angle = Math.atan2(endY - startY, endX - startX);
                     double arrowSize = 12;
-                    double arrowDist = 28; // Distance from end node center so arrow doesn't overlap circle
+                    double arrowDist = 28;
 
-                    // Tip of the arrow
                     double tipX = endX - arrowDist * Math.cos(angle);
                     double tipY = endY - arrowDist * Math.sin(angle);
 
-                    // Draw a simple polygon as an arrowhead
                     Polygon arrow = new Polygon();
                     arrow.getPoints().addAll(
                             tipX, tipY,
@@ -138,16 +155,13 @@ public class DroneNetworkApp extends Application {
                     );
                     arrow.setFill(Color.LIGHTGRAY);
 
-                    // Text for flow/capacity (Format: "Flow / Capacity")
                     Text flowText = new Text("0 / " + capacityMatrix[u][v]);
                     flowText.setFont(Font.font("Arial", FontWeight.BOLD, 14));
                     flowText.setFill(Color.DARKGRAY);
                     
-                    // Position text near the middle of the edge, offset slightly for readability
                     flowText.setX((startX + endX) / 2 - 15);
                     flowText.setY((startY + endY) / 2 - 10);
 
-                    // Special case to prevent text overlap between A->B and B->A or similar cross routes
                     if (u == 1 && v == 2) {
                         flowText.setX(flowText.getX() + 25);
                     } else if (u == 2 && v == 1) {
@@ -161,9 +175,6 @@ public class DroneNetworkApp extends Application {
         }
     }
 
-    /**
-     * Draws the nodes (hubs) as circles with their respective labels.
-     */
     private void drawNodes() {
         for (int i = 0; i < NUM_NODES; i++) {
             double x = nodeCoords[i][0];
@@ -174,7 +185,6 @@ public class DroneNetworkApp extends Application {
             circle.setStroke(Color.web("#0288D1"));
             circle.setStrokeWidth(3);
 
-            // Special colors for Source and Sink nodes
             if (i == SOURCE) {
                 circle.setFill(Color.web("#C8E6C9"));
                 circle.setStroke(Color.web("#388E3C"));
@@ -185,7 +195,6 @@ public class DroneNetworkApp extends Application {
 
             Text text = new Text(nodeNames[i]);
             text.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-            // Center text above the circle
             text.setX(x - text.getLayoutBounds().getWidth() / 2);
             text.setY(y - 35); 
 
@@ -200,8 +209,11 @@ public class DroneNetworkApp extends Application {
         MaxFlowSolver solver = new MaxFlowSolver(capacityMatrix);
         int maxFlow = solver.solveMaxFlow(SOURCE, SINK);
 
-        // Update the result label
-        resultText.setText("Total Drones Deployed (Max Flow): " + maxFlow);
+        resultText.setText("Max Flow Operation: Total Drones Deployed = " + maxFlow);
+
+        // Fetch optimal fleet based on required number (maxFlow)
+        List<DroneFleetManager.Drone> selectedDrones = fleetManager.getOptimalFleet(maxFlow);
+        updateFleetUI("Max Flow Deployment", selectedDrones);
 
         // Update visual elements for each edge based on the solver's flow calculations
         for (EdgeUI edge : edgeUIs) {
@@ -234,8 +246,83 @@ public class DroneNetworkApp extends Application {
     }
 
     /**
-     * Helper struct to bundle edge visual elements together.
+     * Finds the fastest route (shortest path) and highlights it in the UI.
      */
+    private void deployFirstResponder() {
+        MaxFlowSolver solver = new MaxFlowSolver(capacityMatrix);
+        List<Integer> shortestPath = solver.findFastestRoute(SOURCE, SINK);
+
+        if (shortestPath.isEmpty()) {
+            resultText.setText("First Responder Error: No available path to disaster area.");
+            return;
+        }
+
+        resultText.setText("First Responder Deployed via Shortest Path: " + pathToString(shortestPath));
+
+        // For a first responder, we only need 1 optimal drone (the absolute best one)
+        List<DroneFleetManager.Drone> selectedDrones = fleetManager.getOptimalFleet(1);
+        updateFleetUI("First Responder (Single Elite Drone)", selectedDrones);
+
+        // Reset and update visual edges
+        for (EdgeUI edge : edgeUIs) {
+            edge.flowText.setText("0 / " + capacityMatrix[edge.u][edge.v]); // Reset text
+            
+            // Check if this edge is part of the shortest path
+            boolean isPathEdge = false;
+            for (int i = 0; i < shortestPath.size() - 1; i++) {
+                if (shortestPath.get(i) == edge.u && shortestPath.get(i+1) == edge.v) {
+                    isPathEdge = true;
+                    break;
+                }
+            }
+
+            if (isPathEdge) {
+                // Highlight the shortest path in bold blue
+                edge.line.setStroke(Color.web("#1976D2")); // Blue
+                edge.line.setStrokeWidth(4);
+                edge.arrow.setFill(Color.web("#1976D2"));
+                edge.flowText.setFill(Color.web("#1976D2"));
+                edge.flowText.setText("Path / " + capacityMatrix[edge.u][edge.v]);
+            } else {
+                // Reset unused edges
+                edge.line.setStroke(Color.LIGHTGRAY);
+                edge.line.setStrokeWidth(2);
+                edge.arrow.setFill(Color.LIGHTGRAY);
+                edge.flowText.setFill(Color.DARKGRAY);
+            }
+        }
+    }
+
+    /**
+     * Updates the text area and prints to console to prove sorting works.
+     */
+    private void updateFleetUI(String operationName, List<DroneFleetManager.Drone> drones) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("=== %s ===\n", operationName));
+        sb.append("Greedy Sorting Algorithm Executed: Selecting top drones by Payload, then Battery.\n");
+        sb.append("----------------------------------------------------------------------------\n");
+        
+        System.out.println(sb.toString()); // Print to console per requirements
+
+        for (int i = 0; i < drones.size(); i++) {
+            DroneFleetManager.Drone d = drones.get(i);
+            String droneInfo = String.format("%d. %s\n", (i+1), d.toString());
+            sb.append(droneInfo);
+            System.out.print(droneInfo); // Print to console
+        }
+        
+        fleetStatsArea.setText(sb.toString());
+    }
+    
+    private String pathToString(List<Integer> path) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < path.size(); i++) {
+            sb.append(nodeNames[path.get(i)]);
+            if (i < path.size() - 1) sb.append(" -> ");
+        }
+        return sb.toString();
+    }
+
     private static class EdgeUI {
         int u, v;
         Line line;

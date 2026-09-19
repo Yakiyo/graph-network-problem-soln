@@ -1,6 +1,9 @@
 package com.dronenetwork;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 
 /**
@@ -117,5 +120,59 @@ public class MaxFlowSolver {
     public int getFlow(int u, int v) {
         // The utilized flow on edge (u, v) is the original capacity minus the remaining residual capacity.
         return capacity[u][v] - residualGraph[u][v];
+    }
+
+    /**
+     * Finds the absolute shortest path from source to sink in terms of number of edges.
+     * This implements Breadth-First Search (BFS) which acts as Dijkstra's algorithm 
+     * for a graph with uniform (unweighted) edges.
+     *
+     * @param source The starting node index (Dispatch).
+     * @param sink The ending node index (Disaster area).
+     * @return A list of node indices representing the shortest path, or an empty list if no path exists.
+     */
+    public List<Integer> findFastestRoute(int source, int sink) {
+        boolean[] visited = new boolean[numNodes];
+        int[] parent = new int[numNodes];
+        Queue<Integer> queue = new LinkedList<>();
+
+        queue.add(source);
+        visited[source] = true;
+        parent[source] = -1; // Source has no parent
+
+        boolean pathFound = false;
+
+        // Standard BFS loop to explore level by level
+        while (!queue.isEmpty()) {
+            int u = queue.poll();
+
+            // If we reached the sink, we can stop early (since BFS guarantees shortest path)
+            if (u == sink) {
+                pathFound = true;
+                break;
+            }
+
+            for (int v = 0; v < numNodes; v++) {
+                // If there's an original capacity > 0, it means an edge exists.
+                // We are looking for ANY route, not just residual route, to find the fastest physical path.
+                if (!visited[v] && capacity[u][v] > 0) {
+                    queue.add(v);
+                    parent[v] = u;
+                    visited[v] = true;
+                }
+            }
+        }
+
+        List<Integer> path = new ArrayList<>();
+        if (pathFound) {
+            // Reconstruct the path from sink to source by following parent pointers
+            for (int v = sink; v != -1; v = parent[v]) {
+                path.add(v);
+            }
+            // Reverse the path to be from source to sink
+            Collections.reverse(path);
+        }
+
+        return path;
     }
 }
