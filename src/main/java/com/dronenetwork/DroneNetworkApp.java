@@ -70,7 +70,7 @@ public class DroneNetworkApp extends Application {
     }
 
     @Override
-    public void start(Stage primaryStage) {
+    public void start(@SuppressWarnings("exports") Stage primaryStage) {
         primaryStage.setTitle("Autonomous Drone Network - Operations Center");
 
         // Initialize fleet manager and generate random parameters
@@ -215,38 +215,128 @@ public class DroneNetworkApp extends Application {
         List<DroneFleetManager.Drone> selectedDrones = fleetManager.getOptimalFleet(maxFlow);
         updateFleetUI("Max Flow Deployment", selectedDrones);
 
-        // Update visual elements for each edge based on the solver's flow calculations
+        // Reset visual edges to default state first
         for (EdgeUI edge : edgeUIs) {
-            int flow = solver.getFlow(edge.u, edge.v);
-            int capacity = capacityMatrix[edge.u][edge.v];
+            edge.flowText.setText("0 / " + capacityMatrix[edge.u][edge.v]);
+            edge.line.setStroke(Color.LIGHTGRAY);
+            edge.line.setStrokeWidth(2);
+            edge.arrow.setFill(Color.LIGHTGRAY);
+            edge.flowText.setFill(Color.DARKGRAY);
+        }
 
-            edge.flowText.setText(flow + " / " + capacity);
+        List<MaxFlowSolver.AugmentingStep> steps = solver.getSteps();
+        
+        javafx.animation.Timeline timeline = new javafx.animation.Timeline();
+        double delaySeconds = 0.33; // 1/3 of a second per path segment
+        double currentTime = 0.0;
 
-            // Color coding based on capacity utilization
-            if (flow == capacity) {
-                // Saturated edge (bottleneck) -> Red
-                edge.line.setStroke(Color.RED);
-                edge.line.setStrokeWidth(3.5);
-                edge.arrow.setFill(Color.RED);
-                edge.flowText.setFill(Color.RED);
-            } else if (flow > 0) {
-                // Utilized edge (partial capacity) -> Green
-                edge.line.setStroke(Color.web("#4CAF50"));
-                edge.line.setStrokeWidth(3);
-                edge.arrow.setFill(Color.web("#4CAF50"));
-                edge.flowText.setFill(Color.web("#2E7D32"));
-            } else {
-                // Unused edge -> keep gray
-                edge.line.setStroke(Color.LIGHTGRAY);
-                edge.line.setStrokeWidth(2);
-                edge.arrow.setFill(Color.LIGHTGRAY);
-                edge.flowText.setFill(Color.DARKGRAY);
+        for (MaxFlowSolver.AugmentingStep step : steps) {
+            List<Integer> path = step.path;
+            
+            // Phase 1: Highlight path edges sequentially in Blue
+            for (int i = 0; i < path.size() - 1; i++) {
+                final int u = path.get(i);
+                final int v = path.get(i + 1);
+
+                EdgeUI pathEdge = null;
+                boolean isReverse = false;
+                for (EdgeUI edge : edgeUIs) {
+                    if (edge.u == u && edge.v == v) {
+                        pathEdge = edge;
+                        break;
+                    } else if (edge.u == v && edge.v == u) {
+                        pathEdge = edge;
+                        isReverse = true;
+                        break;
+                    }
+                }
+
+                if (pathEdge != null) {
+                    final EdgeUI edgeToHighlight = pathEdge;
+                    final boolean reverseEdge = isReverse;
+                    currentTime += delaySeconds;
+                    
+                    javafx.animation.KeyFrame highlightFrame = new javafx.animation.KeyFrame(
+                            javafx.util.Duration.seconds(currentTime), 
+                            e -> {
+                                // Highlight the edge in bold blue to show data/flow traversing
+                                edgeToHighlight.line.setStroke(Color.web("#1976D2")); // Blue
+                                edgeToHighlight.line.setStrokeWidth(4);
+                                edgeToHighlight.arrow.setFill(Color.web("#1976D2"));
+                                edgeToHighlight.flowText.setFill(Color.web("#1976D2"));
+                                // Indicate if it's undoing flow on a reverse edge
+                                if (reverseEdge) {
+                                    edgeToHighlight.flowText.setText("Undoing...");
+                                } else {
+                                    edgeToHighlight.flowText.setText("Path / " + capacityMatrix[edgeToHighlight.u][edgeToHighlight.v]);
+                                }
+                            }
+                    );
+                    timeline.getKeyFrames().add(highlightFrame);
+                }
+            }
+            
+            // Phase 2: After the path is fully animated, transition the edges in this path 
+            // to their new Red/Green flow states simultaneously to show the result of this step.
+            currentTime += delaySeconds; 
+            
+            for (int i = 0; i < path.size() - 1; i++) {
+                final int u = path.get(i);
+                final int v = path.get(i + 1);
+                
+                EdgeUI pathEdge = null;
+                int forwardU = u, forwardV = v;
+                for (EdgeUI edge : edgeUIs) {
+                    if (edge.u == u && edge.v == v) {
+                        pathEdge = edge;
+                        break;
+                    } else if (edge.u == v && edge.v == u) {
+                        pathEdge = edge;
+                        forwardU = v;
+                        forwardV = u;
+                        break;
+                    }
+                }
+
+                if (pathEdge != null) {
+                    final EdgeUI edgeToUpdate = pathEdge;
+                    final int fU = forwardU;
+                    final int fV = forwardV;
+                    final int newFlow = step.flowState[fU][fV];
+                    final int cap = capacityMatrix[fU][fV];
+
+                    javafx.animation.KeyFrame updateFrame = new javafx.animation.KeyFrame(
+                            javafx.util.Duration.seconds(currentTime), 
+                            e -> {
+                                edgeToUpdate.flowText.setText(newFlow + " / " + cap);
+                                if (newFlow == cap) {
+                                    edgeToUpdate.line.setStroke(Color.RED);
+                                    edgeToUpdate.line.setStrokeWidth(3.5);
+                                    edgeToUpdate.arrow.setFill(Color.RED);
+                                    edgeToUpdate.flowText.setFill(Color.RED);
+                                } else if (newFlow > 0) {
+                                    edgeToUpdate.line.setStroke(Color.web("#4CAF50"));
+                                    edgeToUpdate.line.setStrokeWidth(3);
+                                    edgeToUpdate.arrow.setFill(Color.web("#4CAF50"));
+                                    edgeToUpdate.flowText.setFill(Color.web("#2E7D32"));
+                                } else {
+                                    edgeToUpdate.line.setStroke(Color.LIGHTGRAY);
+                                    edgeToUpdate.line.setStrokeWidth(2);
+                                    edgeToUpdate.arrow.setFill(Color.LIGHTGRAY);
+                                    edgeToUpdate.flowText.setFill(Color.DARKGRAY);
+                                }
+                            }
+                    );
+                    timeline.getKeyFrames().add(updateFrame);
+                }
             }
         }
+        
+        timeline.play();
     }
 
     /**
-     * Finds the fastest route (shortest path) and highlights it in the UI.
+     * Finds the fastest route (shortest path) and highlights it sequentially in the UI using an animation.
      */
     private void deployFirstResponder() {
         MaxFlowSolver solver = new MaxFlowSolver(capacityMatrix);
@@ -263,34 +353,52 @@ public class DroneNetworkApp extends Application {
         List<DroneFleetManager.Drone> selectedDrones = fleetManager.getOptimalFleet(1);
         updateFleetUI("First Responder (Single Elite Drone)", selectedDrones);
 
-        // Reset and update visual edges
+        // Reset visual edges to default state first
         for (EdgeUI edge : edgeUIs) {
             edge.flowText.setText("0 / " + capacityMatrix[edge.u][edge.v]); // Reset text
-            
-            // Check if this edge is part of the shortest path
-            boolean isPathEdge = false;
-            for (int i = 0; i < shortestPath.size() - 1; i++) {
-                if (shortestPath.get(i) == edge.u && shortestPath.get(i+1) == edge.v) {
-                    isPathEdge = true;
+            edge.line.setStroke(Color.LIGHTGRAY);
+            edge.line.setStrokeWidth(2);
+            edge.arrow.setFill(Color.LIGHTGRAY);
+            edge.flowText.setFill(Color.DARKGRAY);
+        }
+
+        // Setup Timeline for sequential animation of the shortest path
+        javafx.animation.Timeline timeline = new javafx.animation.Timeline();
+        double delaySeconds = 0.33; // 1/3 of a second per path segment
+
+        for (int i = 0; i < shortestPath.size() - 1; i++) {
+            final int u = shortestPath.get(i);
+            final int v = shortestPath.get(i + 1);
+
+            // Find the visual edge component for this path segment
+            EdgeUI pathEdge = null;
+            for (EdgeUI edge : edgeUIs) {
+                if (edge.u == u && edge.v == v) {
+                    pathEdge = edge;
                     break;
                 }
             }
 
-            if (isPathEdge) {
-                // Highlight the shortest path in bold blue
-                edge.line.setStroke(Color.web("#1976D2")); // Blue
-                edge.line.setStrokeWidth(4);
-                edge.arrow.setFill(Color.web("#1976D2"));
-                edge.flowText.setFill(Color.web("#1976D2"));
-                edge.flowText.setText("Path / " + capacityMatrix[edge.u][edge.v]);
-            } else {
-                // Reset unused edges
-                edge.line.setStroke(Color.LIGHTGRAY);
-                edge.line.setStrokeWidth(2);
-                edge.arrow.setFill(Color.LIGHTGRAY);
-                edge.flowText.setFill(Color.DARKGRAY);
+            if (pathEdge != null) {
+                final EdgeUI edgeToHighlight = pathEdge;
+                
+                // Add a KeyFrame at the exact time this edge should be highlighted
+                javafx.animation.KeyFrame keyFrame = new javafx.animation.KeyFrame(
+                        javafx.util.Duration.seconds((i + 1) * delaySeconds), 
+                        e -> {
+                            // Highlight the edge in bold blue
+                            edgeToHighlight.line.setStroke(Color.web("#1976D2")); // Blue
+                            edgeToHighlight.line.setStrokeWidth(4);
+                            edgeToHighlight.arrow.setFill(Color.web("#1976D2"));
+                            edgeToHighlight.flowText.setFill(Color.web("#1976D2"));
+                            edgeToHighlight.flowText.setText("Path / " + capacityMatrix[edgeToHighlight.u][edgeToHighlight.v]);
+                        }
+                );
+                timeline.getKeyFrames().add(keyFrame);
             }
         }
+        
+        timeline.play();
     }
 
     /**

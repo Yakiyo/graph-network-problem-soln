@@ -18,6 +18,24 @@ public class MaxFlowSolver {
     private int[][] capacity; // Original capacities of the flight corridors
     private int[][] residualGraph; // Residual capacities tracking available space
 
+    private List<AugmentingStep> steps = new ArrayList<>();
+
+    public static class AugmentingStep {
+        public List<Integer> path;
+        public int[][] flowState;
+        public int flowPushed;
+
+        public AugmentingStep(List<Integer> path, int[][] flowState, int flowPushed) {
+            this.path = path;
+            this.flowState = flowState;
+            this.flowPushed = flowPushed;
+        }
+    }
+
+    public List<AugmentingStep> getSteps() {
+        return steps;
+    }
+
     /**
      * Initializes the solver with a given capacity matrix.
      * @param capacityMatrix 2D adjacency matrix representing maximum drone capacity on each route.
@@ -85,16 +103,24 @@ public class MaxFlowSolver {
     public int solveMaxFlow(int source, int sink) {
         int[] parent = new int[numNodes];
         int maxFlow = 0;
+        steps.clear();
 
         // Loop as long as there is an augmenting path from source to sink
         while (bfs(source, sink, parent)) {
             // Find the bottleneck capacity (minimum residual capacity) along the found path
             int pathFlow = Integer.MAX_VALUE;
+            List<Integer> currentPath = new ArrayList<>();
 
             for (int v = sink; v != source; v = parent[v]) {
                 int u = parent[v];
                 pathFlow = Math.min(pathFlow, residualGraph[u][v]);
             }
+
+            // Record path from source to sink
+            for (int v = sink; v != -1; v = parent[v]) {
+                currentPath.add(v);
+            }
+            Collections.reverse(currentPath);
 
             // Update residual capacities of the edges and reverse edges along the path
             for (int v = sink; v != source; v = parent[v]) {
@@ -105,6 +131,15 @@ public class MaxFlowSolver {
 
             // Add the flow of this path to the total max flow
             maxFlow += pathFlow;
+
+            // Create a snapshot of current flow
+            int[][] currentFlowState = new int[numNodes][numNodes];
+            for (int i = 0; i < numNodes; i++) {
+                for (int j = 0; j < numNodes; j++) {
+                    currentFlowState[i][j] = capacity[i][j] - residualGraph[i][j];
+                }
+            }
+            steps.add(new AugmentingStep(currentPath, currentFlowState, pathFlow));
         }
 
         return maxFlow;
